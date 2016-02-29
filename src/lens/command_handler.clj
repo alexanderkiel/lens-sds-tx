@@ -1,115 +1,195 @@
 (ns lens.command-handler
-  (:use plumbing.core)
-  (:require [lens.broker :refer [handle-command send-event]]
-            [lens.logging :refer [debug]]
-            [schema.core :as s :refer [Str Keyword]]
+  (:require [clojure.core.async :as async :refer [go-loop <! >!]]
+            [clojure.core.cache :as cache]
+            [com.stuartsierra.component :refer [Lifecycle]]
             [datomic.api :as d]
-            [clj-uuid :as uuid])
-  (:import [java.util.concurrent ExecutionException]))
+            [lens.logging :as log :refer [debug trace warn]]
+            [lens.util :as u :refer [NonNegInt]]
+            [lens.handlers.core :refer [get-command get-agg-id-attr]]
+            [lens.cache :as lc]
+            [lens.handlers.study]
+            [lens.handlers.subject]
+            [lens.handlers.study-event]
+            [lens.handlers.form]
+            [lens.handlers.item-group]
+            [lens.handlers.item]
+            [schema.core :as s]
+            [clj-uuid :as uuid]))
 
-(set! *warn-on-reflection* true)
+(def EId
+  (s/named NonNegInt "eid"))
 
-(defn resolve-tempid [tid tx-result]
-  (d/resolve-tempid (:db-after tx-result) (:tempids tx-result) tid))
-
-(defn- success-event [tid id-attr tx-result]
-  (let [db (:db-after tx-result)
-        t (d/basis-t db)
-        tx (d/entity db (d/t->tx t))]
-    {:id (:event/id tx)
-     :cid (:event/cid tx)
-     :name (:event/name tx)
-     :sub (:event/sub tx)
-     :t t
-     :data {:id (id-attr (d/entity db (resolve-tempid tid tx-result)))}}))
-
-(defn transaction-timeout-ex [timeout-ms]
-  (ex-info "Transaction timeout."
-           {:type ::transaction-timeout
-            :timeout-ms timeout-ms}))
-
-(defn- transact-with-timeout [conn tid id-attr tx-data timeout-ms]
-  (if-let [tx-result (deref (d/transact-async conn tx-data) timeout-ms nil)]
-    (success-event tid id-attr tx-result)
-    (throw (transaction-timeout-ex timeout-ms))))
-
-(defn- error-event [^Exception e {:keys [id] :as cmd}]
-  (-> {:id (uuid/v5 id ::transaction-failed)
-       :cid id
-       :name ::transaction-failed
-       :sub (:sub cmd)
-       :data
-       (-> {:error-msg (.getMessage e)}
-           (assoc-when :ex-data (ex-data e)))}))
-
-(defn add-event
-  "Adds event with name to transaction data. The id is build from the command
-  id using a v5 namespaced UUID."
-  {:arglists '([tx-data name cmd])}
-  [tx-data name {:keys [id sub]}]
-  (conj tx-data [:event.fn/create (uuid/v5 id name) id name sub]))
-
-(s/defn transact [db-uri :- Str tid id-attr tx-data
-                  success-event-name :- Keyword cmd]
+(defn perform-command [state {:keys [id name sub params] :as command}]
   (try
-    (transact-with-timeout (d/connect db-uri) tid id-attr
-                           (add-event tx-data success-event-name cmd)
-                           10000)
-    (catch ExecutionException e
-      (error-event (.getCause e) cmd))
-    (catch Exception e
-      (error-event e cmd))))
+    (if-let [perform-command (get-command name)]
+      (-> (perform-command state command params)
+          (conj [:cmd.fn/create id name sub]))
+      (Exception. (str "Missing perform command handler for " name)))
+    (catch Exception e e)))
 
-;; ---- Create Study ----------------------------------------------------------
+(s/defn event-names [db tx :- EId]
+  (d/q '[:find [?n ...]
+         :in $ ?tx
+         :where [?e :event/tx ?tx] [?e :event/name ?n]]
+       db tx))
 
-(defmethod handle-command :create-study
-  [{:keys [broker db-uri]} cmd {:keys [study-oid]}]
-  (let [tid (d/tempid :studies)
-        tx-data [[:study.fn/create tid study-oid]]
-        event (transact db-uri tid :study/oid tx-data :study/created cmd)]
-    (send-event broker event)))
+(defn derive-events [command {db :db-after}]
+  (for [event-name (event-names db (d/t->tx (d/basis-t db)))]
+    {:type :success
+     :id (uuid/v5 (:id command) event-name)
+     :cid (:id command)
+     :name event-name
+     :sub (:sub command)
+     :delivery-tag (:delivery-tag command)
+     :t (d/basis-t db)}))
 
-;; ---- Create Subject --------------------------------------------------------
+(defn- error-event [command error]
+  {:type :error
+   :id (uuid/v5 (:id command) :error)
+   :cid (:id command)
+   :name :error
+   :sub (:sub command)
+   :delivery-tag (:delivery-tag command)
+   :error (.getMessage error)})
 
-(defmethod handle-command :create-subject
-  [{:keys [broker db-uri]} cmd {:keys [study-oid subject-key]}]
-  (let [tid (d/tempid :subjects)
-        tx-data [[:subject.fn/create tid study-oid subject-key]]
-        event (transact db-uri tid :subject/id tx-data :subject/created cmd)]
-    (send-event broker event)))
+(defn- group-by-state [txs]
+  (group-by #(realized? (first %)) txs))
 
-;; ---- Create Study Event ----------------------------------------------------
+(defn- ports [running n ch]
+  (cond-> [(async/timeout 1)]
+    (> n (count running)) (conj ch)))
 
-(defmethod handle-command :create-study-event
-  [{:keys [broker db-uri]} cmd {:keys [subject-id study-event-oid]}]
-  (let [tid (d/tempid :study-events)
-        tx-data [[:study-event.fn/create tid subject-id study-event-oid]]
-        event (transact db-uri tid :study-event/id tx-data :study-event/created cmd)]
-    (send-event broker event)))
+(defn transact-loop
+  ""
+  [conn n ch]
+  (debug "Start transact looping...")
+  (go-loop [running-txs nil
+            finish? false]
+    (trace {:loop :transact-loop :num-tx-in-flight (count running-txs)})
+    (let [{finished true running false} (group-by-state running-txs)]
+      (doseq [[res ch] finished]
+        (let [res (u/deref-tx-res res)]
+          (trace {:loop :transact-loop :action :push-back-res :res res})
+          (>! ch res)))
+      (cond
+        (seq running)
+        (let [[val port] (async/alts! (ports running n ch))]
+          (if (= ch port)
+            (if-let [[tx-data ch] val]
+              (let [tx (d/transact-async conn tx-data)]
+                (trace {:loop :transact-loop :action :transact :tx-data tx-data})
+                (recur (conj running [tx ch]) false))
+              (recur running true))
+            (recur running finish?)))
+        (not finish?)
+        (if-let [[tx-data ch] (<! ch)]
+          (let [tx (d/transact-async conn tx-data)]
+            (trace {:loop :transact-loop :action :transact :tx-data tx-data})
+            (recur (conj running [tx ch]) false))
+          (recur running true))
+        :else
+        (debug "Finish transact looping.")))))
 
-;; ---- Create Form -----------------------------------------------------------
+(defn db-loop [conn command-chan transact-ch event-ch]
+  "Processes commands from command-ch in the context of the whole database in
+  order and puts the results on event-ch. Contrast this with the aggregate
+  loop which processed commands in the context of a single aggregate."
+  (debug "Start whole database looping...")
+  (go-loop []
+    (if-let [command (<! command-chan)]
+      (let [_ (trace {:loop :db-loop :command command})
+            tx-data (perform-command (d/db conn) command)]
+        (if (instance? Throwable tx-data)
+          (do (trace {:loop :db-loop :error (.getMessage tx-data)})
+              (>! event-ch (error-event command tx-data))
+              (recur))
+          (let [_ (trace {:loop :db-loop :tx-data tx-data})
+                res-ch (async/promise-chan)
+                _ (>! transact-ch [tx-data res-ch])
+                res (<! res-ch)]
+            (trace {:loop :db-loop :res res})
+            (if (instance? Throwable res)
+              (>! event-ch (error-event command res))
+              (doseq [event (derive-events command res)]
+                (>! event-ch event)))
+            (recur))))
+      (debug "Finish whole database looping."))))
 
-(defmethod handle-command :create-form
-  [{:keys [broker db-uri]} cmd {:keys [study-event-id form-oid]}]
-  (let [tid (d/tempid :forms)
-        tx-data [[:form.fn/create tid study-event-id form-oid]]
-        event (transact db-uri tid :form/id tx-data :form/created cmd)]
-    (send-event broker event)))
+(s/defn aggregate-loop
+  "Processes commands from command-ch on aggregate with agg-id in order and
+  puts the events on event-ch."
+  [conn agg-id :- EId command-ch transact-ch event-ch]
+  (debug (format "Start aggregate looping on %s..." agg-id))
+  (go-loop []
+    (if-let [command (<! command-ch)]
+      (let [_ (trace {:loop [:aggregate-loop agg-id] :command command})
+            tx-data (perform-command (d/entity (d/db conn) agg-id) command)]
+        (if (instance? Throwable tx-data)
+          (do (trace {:loop [:aggregate-loop agg-id] :error (.getMessage tx-data)})
+              (>! event-ch (error-event command tx-data))
+              (recur))
+          (let [_ (trace {:loop [:aggregate-loop agg-id] :tx-data tx-data})
+                res-ch (async/promise-chan)
+                _ (>! transact-ch [tx-data res-ch])
+                res (<! res-ch)]
+            (trace {:loop [:aggregate-loop agg-id] :res res})
+            (if (instance? Throwable res)
+              (do (>! event-ch (error-event command res))
+                  (recur))
+              (do (doseq [event (derive-events command res)]
+                    (>! event-ch event))
+                  (recur))))))
+      (debug (format "Finish aggregate looping on %s." agg-id)))))
 
-;; ---- Create Item Group -----------------------------------------------------
+(defn agg-not-found [lookup-ref]
+  (Exception. (format "Aggregate with id %s not found." lookup-ref)))
 
-(defmethod handle-command :create-item-group
-  [{:keys [broker db-uri]} cmd {:keys [form-id item-group-oid]}]
-  (let [tid (d/tempid :item-groups)
-        tx-data [[:item-group.fn/create tid form-id item-group-oid]]
-        event (transact db-uri tid :item-group/id tx-data :item-group/created cmd)]
-    (send-event broker event)))
+(defn aid-but-no-agg-command [{:keys [name aid]}]
+  (Exception. (format "Invalid command %s with aggregate id %s." name aid)))
 
-;; ---- Create Item -----------------------------------------------------------
+(defn- agg-chan-cache [threshold]
+  (lc/closing-lru-cache-factory {} :threshold threshold :close-fn async/close!))
 
-(defmethod handle-command :create-item
-  [{:keys [broker db-uri]} cmd {:keys [item-group-id item-oid data-type value]}]
-  (let [tid (d/tempid :items)
-        tx-data [[:item.fn/create tid item-group-id item-oid data-type value]]
-        event (transact db-uri tid :item/id tx-data :item/created cmd)]
-    (send-event broker event)))
+(defn command-loop [{:keys [conn]} {:keys [command-ch event-ch]}]
+  (debug "Start command looping...")
+  (let [transact-ch (async/chan 64)
+        db-chan (async/chan 8)]
+    (transact-loop conn 32 transact-ch)
+    (db-loop conn db-chan transact-ch event-ch)
+    (go-loop [agg-chans (agg-chan-cache 512)]
+      (if-let [{:keys [aid name] :as command} (<! command-ch)]
+        (let [db (d/db conn)]
+          (trace {:loop :command-loop :command command})
+          (if aid
+            (if-let [id-attr (get-agg-id-attr name)]
+              (if-let [agg-id (:db/id (d/entity db [id-attr aid]))]
+                (if-let [agg-chan (cache/lookup agg-chans agg-id)]
+                  (do (>! agg-chan command)
+                      (recur (cache/hit agg-chans agg-id)))
+                  (let [agg-chan (async/chan 4)]
+                    (aggregate-loop conn agg-id agg-chan transact-ch event-ch)
+                    (>! agg-chan command)
+                    (recur (cache/miss agg-chans agg-id agg-chan))))
+                (do (>! event-ch (error-event command (agg-not-found [id-attr aid])))
+                    (recur agg-chans)))
+              (do (>! event-ch (error-event command (aid-but-no-agg-command command)))
+                  (recur agg-chans)))
+            (do (>! db-chan command) (recur agg-chans))))
+        (debug "Finished command looping.")))))
+
+(defn- info [msg]
+  (log/info {:component "CommandHandler" :msg msg}))
+
+(defrecord CommandHandler [db-creator broker]
+  Lifecycle
+  (start [handler]
+    (info "Start command handler")
+    (command-loop db-creator broker)
+    handler)
+  (stop [handler]
+    (info "Stop command handler")
+    (async/close! (:command-ch broker))
+    handler))
+
+(defn new-command-handler []
+  (map->CommandHandler {}))

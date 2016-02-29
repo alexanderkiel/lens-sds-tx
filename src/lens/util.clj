@@ -1,5 +1,6 @@
 (ns lens.util
-  (:require [clojure.string :as str]
+  (:require [clojure.core.async :refer [<! go-loop timeout]]
+            [clojure.string :as str]
             [schema.core :as s :refer [Int]]
             [datomic.api :as d]
             [lens.logging :refer [trace]])
@@ -23,9 +24,9 @@
   s/Num)
 
 (s/defn duration :- Ms
-        "Returns the duaration in milliseconds from a System/nanoTime start point."
-        [start :- Int]
-        (/ (double (- (System/nanoTime) start)) 1000000.0))
+  "Returns the duaration in milliseconds from a System/nanoTime start point."
+  [start :- Int]
+  (/ (double (- (System/nanoTime) start)) 1000000.0))
 
 ;; ---- Datomic ---------------------------------------------------------------
 
@@ -50,6 +51,12 @@
         tx-result (transact conn (fn tid))
         db (:db-after tx-result)]
     (d/entity db (d/resolve-tempid db (:tempids tx-result) tid))))
+
+(defn deref-tx-res [f]
+  (try
+    (deref f)
+    (catch ExecutionException e (.getCause e))
+    (catch Exception e e)))
 
 ;; ---- Schema ----------------------------------------------------------------
 

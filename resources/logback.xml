@@ -52,6 +52,7 @@
   <logger name="org.apache.tomcat.jdbc.pool" level="INFO"/>
 
   <logger name="lens.broker" level="INFO"/>
+  <logger name="lens.command-handler" level="INFO"/>
 
   <root level="INFO">
     <appender-ref ref="STDOUT"/>
