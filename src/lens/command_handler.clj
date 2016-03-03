@@ -7,17 +7,21 @@
             [lens.util :as u :refer [NonNegInt]]
             [lens.handlers.core :refer [get-command get-agg-id-attr]]
             [lens.cache :as lc]
+            [lens.common :refer [Command]]
             [lens.handlers.study]
             [lens.handlers.subject]
             [lens.handlers.study-event]
             [lens.handlers.form]
             [lens.handlers.item-group]
             [lens.handlers.item]
-            [schema.core :as s]
+            [schema.core :as s :refer [Keyword]]
             [clj-uuid :as uuid]))
 
 (def EId
   (s/named NonNegInt "eid"))
+
+(def T
+  (s/named NonNegInt "t"))
 
 (defn perform-command [state {:keys [id name sub params] :as command}]
   (try
@@ -33,15 +37,18 @@
          :where [?e :event/tx ?tx] [?e :event/name ?n]]
        db tx))
 
+(s/defn event [command :- Command t :- T event-name :- Keyword]
+  {:type :success
+   :id (uuid/v5 (:id command) event-name)
+   :cid (:id command)
+   :name event-name
+   :sub (:sub command)
+   :delivery-tag (:delivery-tag command)
+   :t t})
+
 (defn derive-events [command {db :db-after}]
   (for [event-name (event-names db (d/t->tx (d/basis-t db)))]
-    {:type :success
-     :id (uuid/v5 (:id command) event-name)
-     :cid (:id command)
-     :name event-name
-     :sub (:sub command)
-     :delivery-tag (:delivery-tag command)
-     :t (d/basis-t db)}))
+    (event command (d/basis-t db) event-name)))
 
 (defn- error-event [command error]
   {:type :error
@@ -150,6 +157,16 @@
 (defn- agg-chan-cache [threshold]
   (lc/closing-lru-cache-factory {} :threshold threshold :close-fn async/close!))
 
+(s/defn find-events
+  "Finds already existing events of the command. Used for deduplication."
+  [db {:keys [id] :as command} :- Command]
+  (->> (d/q '[:find ?tx ?en
+              :in $ ?cid
+              :where [?tx :cmd/id ?cid] [?e :event/tx ?tx] [?e :event/name ?en]]
+            db id)
+       (map (fn [[tx event-name]] (event command (d/tx->t tx) event-name)))
+       (seq)))
+
 (defn command-loop [{:keys [conn]} {:keys [command-ch event-ch]}]
   (debug "Start command looping...")
   (let [transact-ch (async/chan 64)
@@ -160,21 +177,25 @@
       (if-let [{:keys [aid name] :as command} (<! command-ch)]
         (let [db (d/db conn)]
           (trace {:loop :command-loop :command command})
-          (if aid
-            (if-let [id-attr (get-agg-id-attr name)]
-              (if-let [agg-id (:db/id (d/entity db [id-attr aid]))]
-                (if-let [agg-chan (cache/lookup agg-chans agg-id)]
-                  (do (>! agg-chan command)
-                      (recur (cache/hit agg-chans agg-id)))
-                  (let [agg-chan (async/chan 4)]
-                    (aggregate-loop conn agg-id agg-chan transact-ch event-ch)
-                    (>! agg-chan command)
-                    (recur (cache/miss agg-chans agg-id agg-chan))))
-                (do (>! event-ch (error-event command (agg-not-found [id-attr aid])))
+          (if-let [events (find-events db command)]
+            (do (doseq [event events]
+                  (>! event-ch event))
+                (recur agg-chans))
+            (if aid
+              (if-let [id-attr (get-agg-id-attr name)]
+                (if-let [agg-id (:db/id (d/entity db [id-attr aid]))]
+                  (if-let [agg-chan (cache/lookup agg-chans agg-id)]
+                    (do (>! agg-chan command)
+                        (recur (cache/hit agg-chans agg-id)))
+                    (let [agg-chan (async/chan 4)]
+                      (aggregate-loop conn agg-id agg-chan transact-ch event-ch)
+                      (>! agg-chan command)
+                      (recur (cache/miss agg-chans agg-id agg-chan))))
+                  (do (>! event-ch (error-event command (agg-not-found [id-attr aid])))
+                      (recur agg-chans)))
+                (do (>! event-ch (error-event command (aid-but-no-agg-command command)))
                     (recur agg-chans)))
-              (do (>! event-ch (error-event command (aid-but-no-agg-command command)))
-                  (recur agg-chans)))
-            (do (>! db-chan command) (recur agg-chans))))
+              (do (>! db-chan command) (recur agg-chans)))))
         (debug "Finished command looping.")))))
 
 (defn- info [msg]

@@ -17,7 +17,8 @@
    :name Keyword
    (s/optional-key :aid) Any
    :sub NonBlankStr
-   (s/optional-key :params) Params})
+   (s/optional-key :params) Params
+   Any Any})
 
 (def Event
   "An event is something which happend in a system.
@@ -30,4 +31,5 @@
    :name Keyword
    :sub NonBlankStr
    (s/optional-key :t) Int
-   (s/optional-key :data) {Any Any}})
+   (s/optional-key :data) {Any Any}
+   Any Any})
