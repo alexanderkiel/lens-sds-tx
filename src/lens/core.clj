@@ -12,11 +12,12 @@
   (.availableProcessors (Runtime/getRuntime)))
 
 (defn -main [& _]
-  (letk [[port thread version db-uri :as system] (new-system env)]
+  (letk [[port thread version db-creator broker :as system] (new-system env)]
     (comp/start system)
     (info {:version version})
     (info {:max-memory (max-memory)})
     (info {:num-cpus (available-processors)})
-    (info {:datomic db-uri})
+    (info {:database (:db-uri db-creator)})
+    (info {:broker (:host broker)})
     (info {:listen (str "0.0.0.0:" port)})
     (info {:num-worker-threads thread})))
