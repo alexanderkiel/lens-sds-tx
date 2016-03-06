@@ -52,7 +52,8 @@
     (str ns "." (name event-name))
     (name event-name)))
 
-(defn send-event [ch exchange {:keys [name] :as event}]
+(s/defn send-event [ch exchange {:keys [name] :as event} :- Event]
+  (debug {:action :send-event :event event})
   (lb/publish ch exchange (event-routing-key name) (write event)))
 
 (defn events-loop [ch exchange event-ch]
