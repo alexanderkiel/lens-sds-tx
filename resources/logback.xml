@@ -51,7 +51,7 @@
   <logger name="org.hornetq.core.client.impl" level="INFO"/>
   <logger name="org.apache.tomcat.jdbc.pool" level="INFO"/>
 
-  <logger name="lens.broker" level="DEBUG"/>
+  <logger name="lens.broker" level="INFO"/>
   <logger name="lens.command-handler" level="INFO"/>
 
   <root level="INFO">
