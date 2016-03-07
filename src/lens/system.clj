@@ -7,7 +7,8 @@
             [lens.command-handler :refer [new-command-handler]]
             [lens.util :as u]))
 
-(defnk new-system [lens-sds-tx-version db-uri port broker-host]
+(defnk new-system [lens-sds-tx-version db-uri {transact-parallelism "32"}
+                   port broker-host]
   (comp/system-map
     :version lens-sds-tx-version
     :port (u/parse-long port)
@@ -20,7 +21,8 @@
     (new-broker {:host broker-host})
 
     :command-handler
-    (comp/using (new-command-handler) [:db-creator :broker])
+    (comp/using (new-command-handler (u/parse-long transact-parallelism))
+                [:db-creator :broker])
 
     :server
     (comp/using (new-server) [:port :thread :db-creator :broker])))

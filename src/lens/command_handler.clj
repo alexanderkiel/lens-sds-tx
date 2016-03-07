@@ -67,7 +67,7 @@
     (> n (count running)) (conj ch)))
 
 (defn transact-loop
-  ""
+  "Loops over channel and issues transactions against conn with parallelism n."
   [conn n ch]
   (debug "Start transact looping...")
   (go-loop [running-txs nil
@@ -167,11 +167,15 @@
        (map (fn [[tx event-name]] (event command (d/tx->t tx) event-name)))
        (seq)))
 
-(defn command-loop [{:keys [conn]} {:keys [command-ch event-ch]}]
+(defn command-loop
+  "Loops over commands from broker, issues transactions against the conn from
+  db-creator and reports back events to broker."
+  {:arglists '([db-creator broker transact-parallelism])}
+  [{:keys [conn]} {:keys [command-ch event-ch]} transact-parallelism]
   (debug "Start command looping...")
-  (let [transact-ch (async/chan 64)
+  (let [transact-ch (async/chan transact-parallelism)
         db-chan (async/chan 8)]
-    (transact-loop conn 32 transact-ch)
+    (transact-loop conn transact-parallelism transact-ch)
     (db-loop conn db-chan transact-ch event-ch)
     (go-loop [agg-chans (agg-chan-cache 512)]
       (if-let [{:keys [aid name] :as command} (<! command-ch)]
@@ -201,16 +205,16 @@
 (defn- info [msg]
   (log/info {:component "CommandHandler" :msg msg}))
 
-(defrecord CommandHandler [db-creator broker]
+(defrecord CommandHandler [transact-parallelism db-creator broker]
   Lifecycle
   (start [handler]
     (info "Start command handler")
-    (command-loop db-creator broker)
+    (command-loop db-creator broker transact-parallelism)
     handler)
   (stop [handler]
     (info "Stop command handler")
     (async/close! (:command-ch broker))
     handler))
 
-(defn new-command-handler []
-  (map->CommandHandler {}))
+(defn new-command-handler [transact-parallelism]
+  (map->CommandHandler {:transact-parallelism transact-parallelism}))

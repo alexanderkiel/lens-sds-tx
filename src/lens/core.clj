@@ -25,12 +25,14 @@
 
 (defn -main [& _]
   (schedule-memory-logging 1 TimeUnit/MINUTES)
-  (letk [[port thread version db-creator broker :as system] (new-system env)]
+  (letk [[port thread version db-creator broker command-handler :as system]
+         (new-system env)]
     (comp/start system)
     (info {:version version})
     (info {:max-memory (max-memory)})
     (info {:num-cpus (available-processors)})
     (info {:database (:db-uri db-creator)})
+    (info {:transact-parallelism (:transact-parallelism command-handler)})
     (info {:broker (:host broker)})
     (info {:listen (str "0.0.0.0:" port)})
     (info {:num-worker-threads thread})))
