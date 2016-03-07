@@ -19,7 +19,7 @@
 (defcommand create-study-event
   {:aliases [:odm-import/insert-study-event]
    :agg-id-attr :subject/id}
-  (s/fn [subject :- Subject _ {:keys [study-event-oid]}]
+  (s/fn [_ subject :- Subject _ {:keys [study-event-oid]}]
     (s/validate Str study-event-oid)
     (when (find-study-event subject study-event-oid)
       (throw (duplicate subject study-event-oid)))
@@ -32,7 +32,7 @@
 
 (defcommand odm-import/upsert-study-event
   {:agg-id-attr :subject/id}
-  (s/fn [subject :- Subject _ {:keys [study-event-oid]}]
+  (s/fn [_ subject :- Subject _ {:keys [study-event-oid]}]
     (s/validate Str study-event-oid)
     (if-let [study-event (find-study-event subject study-event-oid)]
       [[:agg.fn/inc-version (:db/id study-event) (:agg/version study-event)]

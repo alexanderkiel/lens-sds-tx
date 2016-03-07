@@ -9,7 +9,7 @@
 
 (defcommand create-study
   {}
-  (fn [_ _ {:keys [study-oid]}]
+  (fn [_ _ _ {:keys [study-oid]}]
     (s/validate Str study-oid)
     [[:study.fn/create (tempid :studies -1) (uuid/v5 uuid/+null+ study-oid)
       study-oid]

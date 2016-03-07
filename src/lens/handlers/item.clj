@@ -11,7 +11,7 @@
 (defcommand create-item
   {:aliases [:odm-import/insert-item]
    :agg-id-attr :item-group/id}
-  (s/fn [item-group :- ItemGroup _ {:keys [item-oid data-type value]}]
+  (s/fn [_ item-group :- ItemGroup _ {:keys [item-oid data-type value]}]
     (s/validate Str item-oid)
     (s/validate DataType data-type)
     (when (some #(= item-oid (:item/oid %)) (:item-group/items item-group))

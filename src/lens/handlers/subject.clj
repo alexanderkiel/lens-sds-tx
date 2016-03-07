@@ -18,7 +18,7 @@
 (defcommand create-subject
   {:aliases [:odm-import/insert-subject]
    :agg-id-attr :study/id}
-  (s/fn [study :- Study _ {:keys [subject-key]}]
+  (s/fn [_ study :- Study _ {:keys [subject-key]}]
     (s/validate Str subject-key)
     (when (find-subject study subject-key)
       (throw (duplicate study subject-key)))
@@ -31,7 +31,7 @@
 
 (defcommand odm-import/upsert-subject
   {:agg-id-attr :study/id}
-  (s/fn [study :- Study _ {:keys [subject-key]}]
+  (s/fn [_ study :- Study _ {:keys [subject-key]}]
     (s/validate Str subject-key)
     (if-let [subject (find-subject study subject-key)]
       [[:agg.fn/inc-version (:db/id subject) (:agg/version subject)]
