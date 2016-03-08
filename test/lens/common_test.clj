@@ -1,4 +1,3 @@
 (ns lens.common-test
-  (:require [lens.common :refer :all]
-            [clojure.test :refer :all]
-            [schema.core :as s]))
+  (:require [clojure.test :refer :all]
+            [lens.common :refer :all]))

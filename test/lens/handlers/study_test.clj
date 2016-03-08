@@ -8,6 +8,6 @@
 (use-fixtures :once validate-schemas)
 
 (deftest create-study-test
-  (is (= (perform-command nil {:name :create-study :params {:study-oid "S001"}})
+  (is (= (perform-command nil nil {:name :create-study :params {:study-oid "S001"}})
          [[:study.fn/create (tempid :studies -1) (uuid/v5 uuid/+null+ "S001") "S001"]
           [:event.fn/create :study/created]])))
