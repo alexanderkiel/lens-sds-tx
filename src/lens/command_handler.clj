@@ -105,7 +105,7 @@
   (go-loop []
     (if-let [command (<! command-chan)]
       (let [_ (trace {:loop :db-loop :command command})
-            tx-data (perform-command (d/db conn) command)]
+            tx-data (perform-command (d/db conn) nil command)]
         (if (instance? Throwable tx-data)
           (do (trace {:loop :db-loop :error (.getMessage tx-data)})
               (>! event-ch (error-event command tx-data))
