@@ -11,12 +11,9 @@
 (defcommand create-item
   {:aliases [:odm-import/insert-item]
    :agg-id-attr :item-group/id}
-  (s/fn [item-group :- ItemGroup _ {:keys [item-oid data-type value]}]
+  (s/fn [_ item-group :- ItemGroup _ {:keys [item-oid data-type value]}]
     (s/validate Str item-oid)
     (s/validate DataType data-type)
-    (when (some #(= item-oid (:item/oid %)) (:item-group/items item-group))
-      (throw (Exception. (str "The item-group " (:item-group/oid item-group) " "
-                              "contains already an item with oid " item-oid "."))))
     [{:db/id (tempid :items -1)
       :agg/version 0
       :item/id (uuid/v5 (:item-group/id item-group) item-oid)

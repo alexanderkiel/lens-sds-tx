@@ -23,10 +23,10 @@
 (def T
   (s/named NonNegInt "t"))
 
-(defn perform-command [state {:keys [id name sub params] :as command}]
+(defn perform-command [db state {:keys [id name sub params] :as command}]
   (try
     (if-let [perform-command (get-command name)]
-      (-> (perform-command state command params)
+      (-> (perform-command db state command params)
           (conj [:cmd.fn/create id name sub]))
       (Exception. (str "Missing perform command handler for " name)))
     (catch Exception e e)))
@@ -105,7 +105,7 @@
   (go-loop []
     (if-let [command (<! command-chan)]
       (let [_ (trace {:loop :db-loop :command command})
-            tx-data (perform-command (d/db conn) command)]
+            tx-data (perform-command (d/db conn) nil command)]
         (if (instance? Throwable tx-data)
           (do (trace {:loop :db-loop :error (.getMessage tx-data)})
               (>! event-ch (error-event command tx-data))
@@ -130,7 +130,8 @@
   (go-loop []
     (if-let [command (<! command-ch)]
       (let [_ (trace {:loop [:aggregate-loop agg-id] :command command})
-            tx-data (perform-command (d/entity (d/db conn) agg-id) command)]
+            db (d/db conn)
+            tx-data (perform-command db (d/entity db agg-id) command)]
         (if (instance? Throwable tx-data)
           (do (trace {:loop [:aggregate-loop agg-id] :error (.getMessage tx-data)})
               (>! event-ch (error-event command tx-data))

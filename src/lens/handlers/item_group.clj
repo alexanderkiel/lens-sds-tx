@@ -11,11 +11,8 @@
 (defcommand create-item-group
   {:aliases [:odm-import/insert-item-group]
    :agg-id-attr :form/id}
-  (s/fn [form :- Form _ {:keys [item-group-oid]}]
+  (s/fn [_ form :- Form _ {:keys [item-group-oid]}]
     (s/validate Str item-group-oid)
-    (when (some #(= item-group-oid (:item-group/oid %)) (:form/item-groups form))
-      (throw (Exception. (str "The form " (:form/oid form) " contains already "
-                              "an item-group with oid " item-group-oid "."))))
     [{:db/id (tempid :item-groups -1)
       :agg/version 0
       :item-group/id (uuid/v5 (:form/id form) item-group-oid)

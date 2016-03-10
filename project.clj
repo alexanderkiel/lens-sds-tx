@@ -1,4 +1,4 @@
-(defproject lens-sds-tx "0.2"
+(defproject lens-sds-tx "0.4.1-alpha-no-unique-checks"
   :description "Lens Study Data Store Transaction Processor"
   :url "https://github.com/alexanderkiel/lens-sds-tx"
   :license {:name "Eclipse Public License"
