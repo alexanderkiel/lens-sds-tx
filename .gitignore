@@ -3,3 +3,5 @@
 /.nrepl-port
 /.idea/
 /*.iml
+/*.pom
+/*.jar
