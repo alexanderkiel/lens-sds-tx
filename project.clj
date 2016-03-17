@@ -43,7 +43,6 @@
              {:repositories [["my.datomic.com" "https://my.datomic.com/repo"]]
               :dependencies [[com.datomic/datomic-pro "0.9.5350"
                               :exclusions [org.slf4j/slf4j-nop
-                                           org.slf4j/slf4j-log4j12
                                            org.apache.httpcomponents/httpclient
                                            commons-codec
                                            joda-time]]
@@ -53,7 +52,7 @@
                                            com.fasterxml.jackson.core/jackson-databind
                                            commons-codec]]
                              [org.apache.curator/curator-framework "2.6.0"
-                              :exclusions [io.netty/netty log4j org.slf4j/slf4j-log4j12
+                              :exclusions [io.netty/netty log4j
                                            com.google.guava/guava]]]}
 
              :production
