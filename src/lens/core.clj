@@ -33,6 +33,6 @@
     (info {:num-cpus (available-processors)})
     (info {:database (:db-uri db-creator)})
     (info {:transact-parallelism (:transact-parallelism command-handler)})
-    (info {:broker (:host broker)})
+    (info {:broker (select-keys broker [:host :port :username])})
     (info {:listen (str "0.0.0.0:" port)})
     (info {:num-worker-threads thread})))
