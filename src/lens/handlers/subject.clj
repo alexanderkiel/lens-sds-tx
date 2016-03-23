@@ -9,6 +9,7 @@
   (s/constrained Entity :subject/id 'subject?))
 
 (defcommand create-subject
+  "Creates a subject in study using stubject-key."
   {:aliases [:odm-import/insert-subject]
    :agg-id-attr :study/id}
   (s/fn [_ study :- Study _ {:keys [subject-key]}]
