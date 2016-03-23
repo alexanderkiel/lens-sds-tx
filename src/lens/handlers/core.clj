@@ -26,7 +26,30 @@
   [name]
   (get-in @handler [name :agg-id-attr]))
 
-(defmacro defcommand [name {:keys [aliases agg-id-attr] :or {aliases []}} fn]
-  (let [names (conj aliases (keyword name))
-        command (assoc-when {:perform-command fn} :agg-id-attr agg-id-attr)]
-    `(swap! ~'lens.handlers.core/handler #(reduce (fn [r# k#] (assoc r# k# ~command)) % ~names))))
+(defn- assoc-command [m name command aliases]
+  (reduce (fn [r name] (assoc r name command)) m (conj aliases name)))
+
+(defn set-command! [name command & aliases]
+  (swap! handler assoc-command name command aliases))
+
+(defmacro defcommand
+  {:arglists '([name doc-string? attr-map? fn])}
+  [name & args]
+  (let [m (if (string? (first args))
+            {:doc (first args)}
+            {})
+        args (if (string? (first args))
+                (next args)
+                args)
+        m (if (map? (first args))
+            (conj m (first args))
+            m)
+        args (if (map? (first args))
+                (next args)
+                args)
+        fn (first args)
+        name (keyword name)
+        aliases (mapv keyword (:aliases m))
+        command (-> (select-keys m [:agg-id-attr])
+                    (assoc :perform-command fn))]
+    `(~'lens.handlers.core/set-command! ~name ~command ~@aliases)))
