@@ -15,16 +15,15 @@
 (def handler (atom {}))
 
 (defn get-command
+  "Returns the command with name."
+  [name]
+  (get @handler name))
+
+(defn get-command-fn
   "Returns the commands function which take an aggregate or database, the
   command itself and the commands parameters."
   [name]
-  (get-in @handler [name :perform-command]))
-
-(defn get-agg-id-attr
-  "Returns the commands aggregate identifer attribute which is used to build
-  the lookup ref of the commands aggregate."
-  [name]
-  (get-in @handler [name :agg-id-attr]))
+  (:perform-command (get-command name)))
 
 (defn- assoc-command [m name command aliases]
   (reduce (fn [r name] (assoc r name command)) m (conj aliases name)))
@@ -33,6 +32,7 @@
   (swap! handler assoc-command name command aliases))
 
 (defmacro defcommand
+  "Defines a command handler."
   {:arglists '([name doc-string? attr-map? fn])}
   [name & args]
   (let [m (if (string? (first args))
@@ -50,6 +50,8 @@
         fn (first args)
         name (keyword name)
         aliases (mapv keyword (:aliases m))
-        command (-> (select-keys m [:agg-id-attr])
-                    (assoc :perform-command fn))]
+        agg (some->> (:agg m) (zipmap [:id-attr :param-key]))
+        command (assoc-when {:perform-command fn} :agg agg)]
     `(~'lens.handlers.core/set-command! ~name ~command ~@aliases)))
+
+(get-command :create-study)

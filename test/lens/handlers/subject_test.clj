@@ -11,53 +11,51 @@
 (use-fixtures :once validate-schemas)
 (use-fixtures :each database-fixture)
 
-(deftest create-subject-perform-command
+(deftest create-study-event
   (testing "success"
-    (let [study {:db/id 1 :study/id (uuid/squuid) :study/oid "S001"}]
+    (let [subject {:db/id 1 :subject/id (uuid/squuid) :subject/key "LI01"}]
       (is (= (perform-command
                nil
-               study
-               {:name :create-subject
-                :params {:subject-key "LI01"}})
-             [{:db/id (tempid :subjects -1)
+               subject
+               {:name :create-study-event
+                :params {:study-event-oid "T01"}})
+             [{:db/id (tempid :study-events -1)
                :agg/version 0
-               :subject/id (uuid/v5 (:study/id study) "LI01")
-               :subject/key "LI01"}
-              [:db/add (:db/id study) :study/subjects (tempid :subjects -1)]
-              [:event.fn/create :subject/created]])))))
+               :study-event/id (uuid/v5 (:subject/id subject) "T01")
+               :study-event/oid "T01"}
+              [:db/add (:db/id subject) :subject/study-events (tempid :study-events -1)]
+              [:event.fn/create :study-event/created]])))))
 
-(deftest odm-import-upsert-subject-perform-command
-  (testing "create on missing subject"
-    (let [study {:db/id 1 :study/id (uuid/squuid) :study/oid "S001"}]
+(deftest odm-import-upsert-study-event
+  (testing "create on missing study-event"
+    (let [subject {:db/id 1 :subject/id (uuid/squuid) :subject/key "LI01"}]
       (is (= (perform-command
                (d/db (connect))
-               study
-               {:name :odm-import/upsert-subject
-                :params {:subject-key "LI01"}})
-             [{:db/id (tempid :subjects -1)
+               subject
+               {:name :odm-import/upsert-study-event
+                :params {:study-event-oid "T01"}})
+             [{:db/id (tempid :study-events -1)
                :agg/version 0
-               :subject/id (uuid/v5 (:study/id study) "LI01")
-               :subject/key "LI01"}
-              [:db/add (:db/id study) :study/subjects (tempid :subjects -1)]
-              [:event.fn/create :subject/created]]))))
-  (testing "update on found subject"
-    (let [study {:db/id 1 :study/id (uuid/squuid) :study/oid "S001"
-                 :study/subjects [{:db/id 2 :agg/version 0
-                                   :subject/key "LI01"}]}
+               :study-event/id (uuid/v5 (:subject/id subject) "T01")
+               :study-event/oid "T01"}
+              [:db/add (:db/id subject) :subject/study-events (tempid :study-events -1)]
+              [:event.fn/create :study-event/created]]))))
+  (testing "update on found study-event"
+    (let [subject {:db/id 1 :subject/id (uuid/squuid) :subject/key "LI01"}
           {db :db-after tempids :tempids}
           @(d/transact
              (connect)
-             [{:db/id (tempid :subjects -1)
+             [{:db/id (tempid :study-events -1)
                :agg/version 0
-               :subject/id (uuid/v5 (:study/id study) "LI01")
-               :subject/key "LI01"}
-              [:db/add (:db/id study) :study/subjects (tempid :subjects -1)]
-              [:event.fn/create :subject/created]])
-          subject-eid (d/resolve-tempid db tempids (tempid :subjects -1))]
+               :study-event/id (uuid/v5 (:subject/id subject) "T01")
+               :study-event/oid "T01"}
+              [:db/add (:db/id subject) :subject/study-events (tempid :study-events -1)]
+              [:event.fn/create :study-event/created]])
+          study-event-eid (d/resolve-tempid db tempids (tempid :study-events -1))]
       (is (= (perform-command
                db
-               study
-               {:name :odm-import/upsert-subject
-                :params {:subject-key "LI01"}})
-             [[:agg.fn/inc-version subject-eid 0]
-              [:event.fn/create :subject/updated]])))))
+               subject
+               {:name :odm-import/upsert-study-event
+                :params {:study-event-oid "T01"}})
+             [[:agg.fn/inc-version study-event-eid 0]
+              [:event.fn/create :study-event/updated]])))))

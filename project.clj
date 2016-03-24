@@ -8,6 +8,7 @@
                  [org.clojure/core.async "0.2.371"]
                  [org.clojure/core.cache "0.6.4"]
                  [org.clojure/tools.logging "0.3.1"]
+                 [org.clojure/tools.reader "0.10.0"]
                  [prismatic/plumbing "0.5.2"]
                  [prismatic/schema "1.0.4"]
                  [http-kit "2.1.18"]

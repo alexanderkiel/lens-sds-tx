@@ -1,23 +1,22 @@
 (ns lens.handlers.item
-  (:require [clj-uuid :as uuid]
-            [datomic.api :refer [tempid]]
+  "Command handlers for the item aggregate."
+  (:require [datomic.api :refer [tempid]]
             [lens.handlers.core :refer [defcommand resolve-entity Entity]]
-            [lens.handlers.item-group :refer [ItemGroup]]
             [schema.core :as s :refer [Str]]))
+
+(def Item
+  (s/constrained Entity :item/id 'item?))
 
 (def DataType
   (s/enum :string :integer :float :datetime))
 
-(defcommand create-item
-  {:aliases [:odm-import/insert-item]
-   :agg-id-attr :item-group/id}
-  (s/fn [_ item-group :- ItemGroup _ {:keys [item-oid data-type value]}]
-    (s/validate Str item-oid)
+(defn attr [data-type]
+  (keyword "item" (str (name data-type) "-value")))
+
+(defcommand odm-import/update-item
+  {:agg [:item/id :item-id]}
+  (s/fn [_ item :- Item _ {:keys [data-type value]}]
     (s/validate DataType data-type)
-    [{:db/id (tempid :items -1)
-      :agg/version 0
-      :item/id (uuid/v5 (:item-group/id item-group) item-oid)
-      :item/oid item-oid
-      (keyword "item" (str (name data-type) "-value")) value}
-     [:db/add (:db/id item-group) :item-group/items (tempid :items -1)]
-     [:event.fn/create :item/created]]))
+    [[:agg.fn/inc-version (:db/id item) (:agg/version item)]
+     [:db/add (:db/id item) (attr data-type) value]
+     [:event.fn/create :item/updated]]))

@@ -1,37 +1,47 @@
 (ns lens.handlers.subject
+  "Command handlers for the subject aggregate."
   (:require [clj-uuid :as uuid]
             [datomic.api :as d :refer [tempid]]
             [lens.handlers.core :refer [defcommand resolve-entity Entity]]
-            [lens.handlers.study :refer [Study]]
+            [lens.util :refer [NonBlankStr]]
             [schema.core :as s :refer [Str]]))
 
 (def Subject
   (s/constrained Entity :subject/id 'subject?))
 
-(defcommand create-subject
-  "Creates a subject in study using stubject-key."
-  {:aliases [:odm-import/insert-subject]
-   :agg-id-attr :study/id}
-  (s/fn [_ study :- Study _ {:keys [subject-key]}]
-    (s/validate Str subject-key)
-    [{:db/id (tempid :subjects -1)
-      :agg/version 0
-      :subject/id (uuid/v5 (:study/id study) subject-key)
-      :subject/key subject-key}
-     [:db/add (:db/id study) :study/subjects (tempid :subjects -1)]
-     [:event.fn/create :subject/created]]))
+(defn- study-event-id [subject study-event-oid]
+  (uuid/v5 (:subject/id subject) study-event-oid))
 
-(defcommand odm-import/upsert-subject
-  {:agg-id-attr :study/id}
-  (s/fn [db study :- Study _ {:keys [subject-key]}]
-    (s/validate Str subject-key)
-    (let [subject-id (uuid/v5 (:study/id study) subject-key)]
-      (if-let [subject (d/entity db [:subject/id subject-id])]
-        [[:agg.fn/inc-version (:db/id subject) (:agg/version subject)]
-         [:event.fn/create :subject/updated]]
-        [{:db/id (tempid :subjects -1)
-          :agg/version 0
-          :subject/id subject-id
-          :subject/key subject-key}
-         [:db/add (:db/id study) :study/subjects (tempid :subjects -1)]
-         [:event.fn/create :subject/created]]))))
+(defcommand create-study-event
+  {:aliases [:odm-import/insert-study-event]
+   :agg [:subject/id :subject-id]}
+  (s/fn [_ subject :- Subject _ {:keys [study-event-oid]}]
+    (s/validate NonBlankStr study-event-oid)
+    [{:db/id (tempid :study-events -1)
+      :agg/version 0
+      :study-event/id (study-event-id subject study-event-oid)
+      :study-event/oid study-event-oid}
+     [:db/add (:db/id subject) :subject/study-events (tempid :study-events -1)]
+     [:event.fn/create :study-event/created]]))
+
+(defcommand odm-import/upsert-study-event
+  {:agg [:subject/id :subject-id]}
+  (s/fn [db subject :- Subject _ {:keys [study-event-oid]}]
+    (s/validate NonBlankStr study-event-oid)
+    (if-let [study-event (d/entity db [:study-event/id (study-event-id subject study-event-oid)])]
+      [[:agg.fn/inc-version (:db/id study-event) (:agg/version study-event)]
+       [:event.fn/create :study-event/updated]]
+      [{:db/id (tempid :study-events -1)
+        :agg/version 0
+        :study-event/id (study-event-id subject study-event-oid)
+        :study-event/oid study-event-oid}
+       [:db/add (:db/id subject) :subject/study-events (tempid :study-events -1)]
+       [:event.fn/create :study-event/created]])))
+
+(defcommand odm-import/remove-study-event
+  {:agg [:subject/id :subject-id]}
+  (s/fn [_ subject :- Subject _ {:keys [study-event-oid]}]
+    (let [study-event-ref [:study-event/id (study-event-id subject study-event-oid)]]
+      [[:db.fn/retractEntity study-event-ref]
+       [:db/retract (:db/id subject) :subject/study-events study-event-ref]
+       [:event.fn/create :study-event/removed]])))

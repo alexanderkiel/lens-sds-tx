@@ -1,6 +1,6 @@
 (ns lens.handlers.test-util
   (:require [datomic.api :as d]
-            [lens.handlers.core :refer [get-command]]
+            [lens.handlers.core :refer [get-command-fn]]
             [lens.schema :refer [load-schema]]))
 
 (def db-uri "datomic:mem://test")
@@ -15,6 +15,6 @@
   (d/delete-database db-uri))
 
 (defn perform-command [db agg {:keys [name params] :as command}]
-  (if-let [cmd (get-command name)]
+  (if-let [cmd (get-command-fn name)]
     (cmd db agg command params)
     (throw (Exception. (str "Command " name " not found.")))))

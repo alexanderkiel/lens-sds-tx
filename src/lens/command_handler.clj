@@ -1,13 +1,15 @@
 (ns lens.command-handler
+  (:use plumbing.core)
   (:require [clojure.core.async :as async :refer [go-loop <! >!]]
             [clojure.core.cache :as cache]
             [com.stuartsierra.component :refer [Lifecycle]]
             [datomic.api :as d]
             [lens.logging :as log :refer [debug trace warn]]
             [lens.util :as u :refer [NonNegInt]]
-            [lens.handlers.core :refer [get-command get-agg-id-attr]]
+            [lens.handlers.core :refer [get-command get-command-fn]]
             [lens.cache :as lc]
             [lens.common :refer [Command]]
+            [lens.handlers.db]
             [lens.handlers.study]
             [lens.handlers.subject]
             [lens.handlers.study-event]
@@ -25,10 +27,10 @@
 
 (defn perform-command [db state {:keys [id name sub params] :as command}]
   (try
-    (if-let [perform-command (get-command name)]
+    (if-let [perform-command (get-command-fn name)]
       (-> (perform-command db state command params)
           (conj [:cmd.fn/create id name sub]))
-      (Exception. (str "Missing perform command handler for " name)))
+      (Exception. (str "Missing command handler for " name)))
     (catch Exception e e)))
 
 (s/defn event-names [db tx :- EId]
@@ -57,7 +59,8 @@
    :name :error
    :sub (:sub command)
    :delivery-tag (:delivery-tag command)
-   :error (.getMessage error)})
+   :command command
+   :error-msg (.getMessage error)})
 
 (defn- group-by-state [txs]
   (group-by #(realized? (first %)) txs))
@@ -125,35 +128,30 @@
 (s/defn aggregate-loop
   "Processes commands from command-ch on aggregate with agg-id in order and
   puts the events on event-ch."
-  [conn agg-id :- EId command-ch transact-ch event-ch]
-  (debug (format "Start aggregate looping on %s..." agg-id))
-  (go-loop []
-    (if-let [command (<! command-ch)]
-      (let [_ (trace {:loop [:aggregate-loop agg-id] :command command})
-            db (d/db conn)
-            tx-data (perform-command db (d/entity db agg-id) command)]
-        (if (instance? Throwable tx-data)
-          (do (trace {:loop [:aggregate-loop agg-id] :error (.getMessage tx-data)})
-              (>! event-ch (error-event command tx-data))
-              (recur))
-          (let [_ (trace {:loop [:aggregate-loop agg-id] :tx-data tx-data})
-                res-ch (async/promise-chan)
-                _ (>! transact-ch [tx-data res-ch])
-                res (<! res-ch)]
-            (trace {:loop [:aggregate-loop agg-id] :res res})
-            (if (instance? Throwable res)
-              (do (>! event-ch (error-event command res))
-                  (recur))
-              (do (doseq [event (derive-events command res)]
-                    (>! event-ch event))
-                  (recur))))))
-      (debug (format "Finish aggregate looping on %s." agg-id)))))
-
-(defn agg-not-found [lookup-ref]
-  (Exception. (format "Aggregate with id %s not found." lookup-ref)))
-
-(defn aid-but-no-agg-command [{:keys [name aid]}]
-  (Exception. (format "Invalid command %s with aggregate id %s." name aid)))
+  [conn agg-id-attr agg-id :- EId command-ch transact-ch event-ch]
+  (debug (format "Start aggregate looping on %s %s..." agg-id-attr agg-id))
+  (let [trace (fn [m] (trace (assoc m :loop [:aggregate-loop agg-id-attr agg-id])))]
+    (go-loop []
+      (if-let [command (<! command-ch)]
+        (let [_ (trace {:command command})
+              db (d/db conn)
+              tx-data (perform-command db (d/entity db agg-id) command)]
+          (if (instance? Throwable tx-data)
+            (do (trace {:error (.getMessage tx-data)})
+                (>! event-ch (error-event command tx-data))
+                (recur))
+            (let [_ (trace {:tx-data tx-data})
+                  res-ch (async/promise-chan)
+                  _ (>! transact-ch [tx-data res-ch])
+                  res (<! res-ch)]
+              (trace {:res res})
+              (if (instance? Throwable res)
+                (do (>! event-ch (error-event command res))
+                    (recur))
+                (do (doseq [event (derive-events command res)]
+                      (>! event-ch event))
+                    (recur))))))
+        (debug (format "Finish aggregate looping on %s." agg-id))))))
 
 (defn- agg-chan-cache [threshold]
   (lc/closing-lru-cache-factory {} :threshold threshold :close-fn async/close!))
@@ -168,6 +166,23 @@
        (map (fn [[tx event-name]] (event command (d/tx->t tx) event-name)))
        (seq)))
 
+(defnk has-agg? [name]
+  (:agg (get-command name)))
+
+(defnk agg-lookup-ref [name :as command]
+  (if-letk [[id-attr param-key] (:agg (get-command name))]
+    [id-attr (get-in command [:params param-key])]))
+
+(defn agg-id [db command]
+  (:db/id (d/entity db (agg-lookup-ref command))))
+
+(defn agg-id-attr [command]
+  (first (agg-lookup-ref command)))
+
+(defn agg-not-found [command]
+  (Exception. (format "Aggregate with id %s not found."
+                      (agg-lookup-ref command))))
+
 (defn command-loop
   "Loops over commands from broker, issues transactions against the conn from
   db-creator and reports back events to broker."
@@ -179,26 +194,23 @@
     (transact-loop conn transact-parallelism transact-ch)
     (db-loop conn db-chan transact-ch event-ch)
     (go-loop [agg-chans (agg-chan-cache 512)]
-      (if-let [{:keys [aid name] :as command} (<! command-ch)]
+      (if-let [command (<! command-ch)]
         (let [db (d/db conn)]
           (trace {:loop :command-loop :command command})
           (if-let [events (find-events db command)]
             (do (doseq [event events]
                   (>! event-ch event))
                 (recur agg-chans))
-            (if aid
-              (if-let [id-attr (get-agg-id-attr name)]
-                (if-let [agg-id (:db/id (d/entity db [id-attr aid]))]
-                  (if-let [agg-chan (cache/lookup agg-chans agg-id)]
-                    (do (>! agg-chan command)
-                        (recur (cache/hit agg-chans agg-id)))
-                    (let [agg-chan (async/chan 4)]
-                      (aggregate-loop conn agg-id agg-chan transact-ch event-ch)
-                      (>! agg-chan command)
-                      (recur (cache/miss agg-chans agg-id agg-chan))))
-                  (do (>! event-ch (error-event command (agg-not-found [id-attr aid])))
-                      (recur agg-chans)))
-                (do (>! event-ch (error-event command (aid-but-no-agg-command command)))
+            (if (has-agg? command)
+              (if-let [agg-id (agg-id db command)]
+                (if-let [agg-chan (cache/lookup agg-chans agg-id)]
+                  (do (>! agg-chan command)
+                      (recur (cache/hit agg-chans agg-id)))
+                  (let [agg-chan (async/chan 4)]
+                    (aggregate-loop conn (agg-id-attr command) agg-id agg-chan transact-ch event-ch)
+                    (>! agg-chan command)
+                    (recur (cache/miss agg-chans agg-id agg-chan))))
+                (do (>! event-ch (error-event command (agg-not-found command)))
                     (recur agg-chans)))
               (do (>! db-chan command) (recur agg-chans)))))
         (debug "Finished command looping.")))))

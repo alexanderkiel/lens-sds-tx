@@ -1,36 +1,33 @@
 (ns lens.handlers.study-event
+  "Command handlers for the study-event aggregate."
   (:require [clj-uuid :as uuid]
-            [datomic.api :as d :refer [tempid squuid]]
+            [datomic.api :refer [tempid squuid]]
             [lens.handlers.core :refer [defcommand resolve-entity Entity]]
-            [lens.handlers.subject :refer [Subject]]
+            [lens.util :refer [NonBlankStr]]
             [schema.core :as s :refer [Str]]))
 
 (def StudyEvent
   (s/constrained Entity :study-event/id 'study-event?))
 
-(defcommand create-study-event
-  {:aliases [:odm-import/insert-study-event]
-   :agg-id-attr :subject/id}
-  (s/fn [_ subject :- Subject _ {:keys [study-event-oid]}]
-    (s/validate Str study-event-oid)
-    [{:db/id (tempid :study-events -1)
-      :agg/version 0
-      :study-event/id (uuid/v5 (:subject/id subject) study-event-oid)
-      :study-event/oid study-event-oid}
-     [:db/add (:db/id subject) :subject/study-events (tempid :study-events -1)]
-     [:event.fn/create :study-event/created]]))
+(defn form-id [study-event form-oid]
+  (uuid/v5 (:study-event/id study-event) form-oid))
 
-(defcommand odm-import/upsert-study-event
-  {:agg-id-attr :subject/id}
-  (s/fn [db subject :- Subject _ {:keys [study-event-oid]}]
-    (s/validate Str study-event-oid)
-    (let [study-event-id (uuid/v5 (:subject/id subject) study-event-oid)]
-      (if-let [study-event (d/entity db [:study-event/id study-event-id])]
-        [[:agg.fn/inc-version (:db/id study-event) (:agg/version study-event)]
-         [:event.fn/create :study-event/updated]]
-        [{:db/id (tempid :study-events -1)
-          :agg/version 0
-          :study-event/id study-event-id
-          :study-event/oid study-event-oid}
-         [:db/add (:db/id subject) :subject/study-events (tempid :study-events -1)]
-         [:event.fn/create :study-event/created]]))))
+(defcommand create-form
+  {:aliases [:odm-import/insert-form]
+   :agg [:study-event/id :study-event-id]}
+  (s/fn [_ study-event :- StudyEvent _ {:keys [form-oid]}]
+    (s/validate NonBlankStr form-oid)
+    [{:db/id (tempid :forms -1)
+      :agg/version 0
+      :form/id (form-id study-event form-oid)
+      :form/oid form-oid}
+     [:db/add (:db/id study-event) :study-event/forms (tempid :forms -1)]
+     [:event.fn/create :form/created]]))
+
+(defcommand odm-import/remove-form
+  {:agg [:study-event/id :study-event-id]}
+  (s/fn [_ study-event :- StudyEvent _ {:keys [form-oid]}]
+    (let [form-ref [:form/id (form-id study-event form-oid)]]
+      [[:db.fn/retractEntity form-ref]
+       [:db/retract (:db/id study-event) :study-event/forms form-ref]
+       [:event.fn/create :form/removed]])))
