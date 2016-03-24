@@ -9,6 +9,7 @@
             [com.stuartsierra.component :as comp]
             [lens.system :refer [new-system]]
             [environ.core :refer [env]]
+            [lens.logging :refer [set-level!]]
             [lens.schema :refer [load-schema]]))
 
 (s/set-fn-validation! true)
@@ -72,4 +73,8 @@
   (d/q '[:find (count ?e) . :where [?e :item/id]] (d/db (connect)))
   (d/q '[:find [?n ...] :where [?e :item/id _ ?t] [?t :cmd/sub ?n]] (d/db (connect)))
   (d/q '[:find [?n ...] :where [?e :item/id _ ?t] [?t :cmd/name ?n]] (d/db (connect)))
+  )
+
+(comment
+  (set-level! "lens.command-handler" :trace)
   )

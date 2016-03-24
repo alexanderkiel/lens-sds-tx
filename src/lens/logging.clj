@@ -1,5 +1,7 @@
 (ns lens.logging
-  (:require [clojure.tools.logging :refer [log]]))
+  (:require [clojure.tools.logging :refer [log]])
+  (:import [ch.qos.logback.classic Level Logger]
+           [org.slf4j LoggerFactory]))
 
 (defmacro trace
   "Trace level logging using data."
@@ -29,3 +31,7 @@
    `(log :error (pr-str ~data)))
   ([throwable data]
    `(log :error ~throwable (pr-str ~data))))
+
+(defn set-level! [^String logger level]
+  (let [logger ^Logger (LoggerFactory/getLogger logger)]
+    (.setLevel logger (Level/toLevel (name level)))))
