@@ -4,25 +4,25 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
-  :dependencies [[org.clojure/clojure "1.8.0"]
+  :dependencies [[bidi "1.25.0"
+                  :exclusions [commons-fileupload]]
+                 [ch.qos.logback/logback-classic "1.1.2"]
+                 [clj-time "0.11.0"]
+                 [com.cognitect/transit-clj "0.8.285"]
+                 [com.novemberain/langohr "3.5.1"
+                  :exclusions [clj-http cheshire]]
+                 [com.stuartsierra/component "0.3.0"]
+                 [danlentz/clj-uuid "0.1.6"]
+                 [environ "1.0.1"]
+                 [http-kit "2.1.18"]
+                 [org.clojure/clojure "1.8.0"]
                  [org.clojure/core.async "0.2.371"]
                  [org.clojure/core.cache "0.6.4"]
                  [org.clojure/tools.logging "0.3.1"]
                  [org.clojure/tools.reader "0.10.0"]
-                 [prismatic/plumbing "0.5.2"]
-                 [prismatic/schema "1.0.4"]
-                 [http-kit "2.1.18"]
-                 [bidi "1.25.0"
-                  :exclusions [commons-fileupload]]
-                 [com.cognitect/transit-clj "0.8.285"]
-                 [clj-time "0.11.0"]
                  [org.slf4j/slf4j-api "1.7.7"]
-                 [ch.qos.logback/logback-classic "1.1.2"]
-                 [com.novemberain/langohr "3.5.1"
-                  :exclusions [clj-http cheshire]]
-                 [com.stuartsierra/component "0.3.0"]
-                 [environ "1.0.1"]
-                 [danlentz/clj-uuid "0.1.6"]]
+                 [prismatic/plumbing "0.5.2"]
+                 [prismatic/schema "1.0.4"]]
 
   :profiles {:dev [:datomic-free :dev-common :base :system :user :provided]
              :dev-pro [:datomic-pro :dev-common :base :system :user :provided]
