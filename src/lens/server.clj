@@ -1,8 +1,8 @@
 (ns lens.server
   (:require [com.stuartsierra.component :refer [Lifecycle]]
-            [org.httpkit.server :refer [run-server]]
+            [lens.app :refer [app]]
             [lens.logging :refer [info]]
-            [lens.app :refer [app]]))
+            [org.httpkit.server :refer [run-server]]))
 
 (defrecord Server [port thread stop-fn]
   Lifecycle
