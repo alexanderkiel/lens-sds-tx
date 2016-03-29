@@ -34,7 +34,7 @@
   (refresh :after 'user/startup))
 
 (defn connect []
-  (:conn (:db-creator system)))
+  (:conn (:database system)))
 
 ;; Init Development
 (comment

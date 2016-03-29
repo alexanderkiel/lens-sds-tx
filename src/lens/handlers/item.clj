@@ -8,10 +8,19 @@
   (s/constrained Entity :item/id 'item?))
 
 (def DataType
-  (s/enum :string :integer :float :datetime))
+  ":datetime is deprecated"
+  (s/enum :string :integer :float :date-time :datetime))
+
+(defn- coerce
+  ":date-time is the current value but internally in the database
+  we have still :datetime"
+  [data-type]
+  (if (= :date-time data-type)
+    :datetime
+    data-type))
 
 (defn attr [data-type]
-  (keyword "item" (str (name data-type) "-value")))
+  (keyword "item" (str (name (coerce data-type)) "-value")))
 
 (defcommand odm-import/update-item
   {:agg [:item/id :item-id]}

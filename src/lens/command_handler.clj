@@ -184,9 +184,9 @@
                       (agg-lookup-ref command))))
 
 (defn command-loop
-  "Loops over commands from broker, issues transactions against the conn from
-  db-creator and reports back events to broker."
-  {:arglists '([db-creator broker transact-parallelism])}
+  "Loops over commands from broker, issues transactions against the database and
+  reports back events to broker."
+  {:arglists '([database broker transact-parallelism])}
   [{:keys [conn]} {:keys [command-ch event-ch]} transact-parallelism]
   (debug "Start command looping...")
   (let [transact-ch (async/chan transact-parallelism)
@@ -218,11 +218,11 @@
 (defn- info [msg]
   (log/info {:component "CommandHandler" :msg msg}))
 
-(defrecord CommandHandler [transact-parallelism db-creator broker]
+(defrecord CommandHandler [transact-parallelism database broker]
   Lifecycle
   (start [handler]
     (info "Start command handler")
-    (command-loop db-creator broker transact-parallelism)
+    (command-loop database broker transact-parallelism)
     handler)
   (stop [handler]
     (info "Stop command handler")

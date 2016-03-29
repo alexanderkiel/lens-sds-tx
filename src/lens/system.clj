@@ -3,7 +3,7 @@
   (:require [com.stuartsierra.component :as comp]
             [lens.server :refer [new-server]]
             [lens.broker :refer [new-broker]]
-            [lens.datomic :refer [new-database-creator]]
+            [lens.database :refer [new-database]]
             [lens.command-handler :refer [new-command-handler]]
             [lens.util :as u]))
 
@@ -15,8 +15,8 @@
     :port (u/parse-long port)
     :thread 4
 
-    :db-creator
-    (new-database-creator db-uri)
+    :database
+    (new-database db-uri)
 
     :broker
     (new-broker {:host broker-host :username broker-username
@@ -24,7 +24,7 @@
 
     :command-handler
     (comp/using (new-command-handler (u/parse-long transact-parallelism))
-                [:db-creator :broker])
+                [:database :broker])
 
     :server
-    (comp/using (new-server) [:port :thread :db-creator :broker])))
+    (comp/using (new-server) [:port :thread :database :broker])))

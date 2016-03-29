@@ -25,13 +25,13 @@
 
 (defn -main [& _]
   (schedule-memory-logging 1 TimeUnit/MINUTES)
-  (letk [[port thread version db-creator broker command-handler :as system]
+  (letk [[port thread version database broker command-handler :as system]
          (new-system env)]
     (comp/start system)
     (info {:version version})
     (info {:max-memory (max-memory)})
     (info {:num-cpus (available-processors)})
-    (info {:database (:db-uri db-creator)})
+    (info {:database (:db-uri database)})
     (info {:transact-parallelism (:transact-parallelism command-handler)})
     (info {:broker (select-keys broker [:host :port :username])})
     (info {:listen (str "0.0.0.0:" port)})
