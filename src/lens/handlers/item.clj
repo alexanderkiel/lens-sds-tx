@@ -26,6 +26,11 @@
   {:agg [:item/id :item-id]}
   (s/fn [_ item :- Item _ {:keys [data-type value]}]
     (s/validate DataType data-type)
-    [[:agg.fn/inc-version (:db/id item) (:agg/version item)]
-     [:db/add (:db/id item) (attr data-type) value]
-     [:event.fn/create :item/updated]]))
+    (if (some? ((attr data-type) item))
+      [[:agg.fn/inc-version (:db/id item) (:agg/version item)]
+       [:db/add (:db/id item) (attr data-type) value]
+       [:event.fn/create :item/updated]]
+      (throw (Exception. (str "Can't update the item " (:item/id item) " "
+                              "with value " value " of data-type " data-type " "
+                              "because the data type doesn't match the items "
+                              "data type."))))))
